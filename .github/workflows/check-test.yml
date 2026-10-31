@@ -96,6 +96,17 @@ jobs:
         if: github.repository_owner != 'anomalyco' && runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y ripgrep
 
+      - name: Install ripgrep on hosted Windows
+        if: github.repository_owner != 'anomalyco' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "ripgrep.zip"
+          Invoke-WebRequest "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-pc-windows-msvc.zip" -OutFile $archive
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne "124510b94b6baa3380d051fdf4650eaa80a302c876d611e9dba0b2e18d87493a") { throw "ripgrep checksum mismatch" }
+          $directory = Join-Path $env:RUNNER_TEMP "ripgrep"
+          Expand-Archive $archive -DestinationPath $directory
+          Join-Path $directory "ripgrep-15.1.0-x86_64-pc-windows-msvc" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
       - name: Test Effect simplification rules
         if: runner.os == 'Linux'
         run: bun run test:effect-simplification-rules
