@@ -69,6 +69,55 @@ const expectToolResult = (body: AnthropicMessages.AnthropicMessagesBody): Anthro
 }
 
 describe("Anthropic Messages route", () => {
+  it.effect("drops orphaned local tool results from the wire body", () =>
+    Effect.gen(function* () {
+      const prepared = yield* compileRequest(
+        ai.request({
+          model,
+          messages: [
+            Message.user("hi"),
+            Message.tool({ id: "orphan", name: "lookup", result: "ignored" }),
+            Message.user("bye"),
+          ],
+          cache: "none",
+        }),
+      )
+
+      expect(prepared.body.messages.flatMap((message) =>
+        message.role === "user" ? message.content.filter((part) => part.type === "tool_result") : [],
+      )).toEqual([])
+      expect(prepared.body.messages.flatMap((message) =>
+        message.role === "user" ? message.content.filter((part) => part.type === "text").map((part) => part.text) : [],
+      )).toEqual(["hi", "bye"])
+    }),
+  )
+
+  it.effect("keeps one faithful immediate result when a user update splits a completed call", () =>
+    Effect.gen(function* () {
+      const prepared = yield* compileRequest(
+        ai.request({
+          model,
+          messages: [
+            Message.assistant([ToolCallPart.make({ id: "call_1", name: "lookup", input: {} })]),
+            Message.user("Monitor status update"),
+            Message.tool({ id: "call_1", name: "lookup", result: "faithful completed output", resultType: "text" }),
+          ],
+          cache: "none",
+        }),
+      )
+
+      expect(prepared.body.messages.flatMap((message) =>
+        message.role === "user"
+          ? message.content.filter((part) => part.type === "tool_result").map((part) => part.tool_use_id)
+          : [],
+      )).toEqual(["call_1"])
+      expect(prepared.body.messages[1]).toMatchObject({
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: "call_1", content: "faithful completed output" }],
+      })
+    }),
+  )
+
   it.effect("prepares Anthropic Messages target", () =>
     Effect.gen(function* () {
       const prepared = yield* compileRequest(request)

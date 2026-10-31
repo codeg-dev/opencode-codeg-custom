@@ -902,6 +902,16 @@ const appendToUserTurn = (messages: AnthropicMessage[], block: AnthropicUserBloc
 
 const lowerMessages = Effect.fnUntraced(function* (request: LLMRequest, breakpoints: Cache.Breakpoints) {
   const messages: AnthropicMessage[] = []
+  const pending = new Set<string>()
+  const results = new Map(
+    request.messages.flatMap((message) =>
+      message.role === "tool"
+        ? message.content
+            .filter((part) => part.type === "tool-result")
+            .map((part): [string, typeof part] => [part.id, part])
+        : [],
+    ),
+  )
   const providerMetadataKey = request.model.route.providerMetadataKey ?? request.model.provider
   // Text updates stay where they are unless a user turn follows them; then they move after the latest
   // user turn, the nearest spot where Anthropic accepts a native system message.
@@ -981,6 +991,7 @@ const lowerMessages = Effect.fnUntraced(function* (request: LLMRequest, breakpoi
           continue
         }
         if (part.type === "tool-call") {
+          if (!part.providerExecuted) pending.add(part.id)
           content.push(part.providerExecuted ? lowerServerToolCall(part) : lowerToolCall(part))
           continue
         }
@@ -1002,14 +1013,17 @@ const lowerMessages = Effect.fnUntraced(function* (request: LLMRequest, breakpoi
     for (const part of message.content) {
       if (!ProviderShared.supportsContent(part, ["tool-result"]))
         return yield* ProviderShared.unsupportedContent("Anthropic Messages", "tool", ["tool-result"])
+      const result = results.get(part.id)
+      if (!result || !pending.delete(part.id)) continue
       content.push({
         type: "tool_result",
         tool_use_id: scrubToolCallID(part.id),
-        content: yield* lowerToolResultContent(part, request),
-        is_error: part.result.type === "error" ? true : undefined,
-        cache_control: cacheControl(breakpoints, part.cache),
+        content: yield* lowerToolResultContent(result, request),
+        is_error: result.result.type === "error" ? true : undefined,
+        cache_control: cacheControl(breakpoints, result.cache),
       })
     }
+    if (content.length === 0) continue
     const previous = messages.at(-1)
     if (previous?.role === "user" && previous.content.every((block) => block.type === "tool_result"))
       messages[messages.length - 1] = { role: "user", content: [...previous.content, ...content] }
