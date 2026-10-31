@@ -92,6 +92,10 @@ jobs:
       - name: Setup Bun
         uses: ./.github/actions/setup-bun
 
+      - name: Install ripgrep on hosted Linux
+        if: github.repository_owner != 'anomalyco' && runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
       - name: Test Effect simplification rules
         if: runner.os == 'Linux'
         run: bun run test:effect-simplification-rules
